@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Audio Processing</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f0f0f0;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+    }
+
+    .container {
+      text-align: center;
+      padding: 20px;
+      border-radius: 10px;
+      background-color: rgb(202, 203, 203);
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    }
+
+    h1, h2 {
+      margin: 0;
+      color: #333333;
+    }
+
+    input[type="text"], button {
+      padding: 10px;
+      margin: 5px;
+      font-size: 16px;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+    }
+
+    button {
+      background-color: #4CAF50;
+      border: none;
+      color: white;
+      cursor: pointer;
+      transition: background-color 0.3s ease;
+    }
+
+    button:hover {
+      background-color: #45a049;
+    }
+
+    .image-processing-btn {
+      margin-top: 30px; /* Tambahkan ruang 20px di atas tombol */
+      
+    }
+
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Audio Processing</h1>
+    <h2>Abdullah Amali (1217050001)</h2> 
+
+    <input type="file" id="audioInput">
+    <br>
+    <label for="startTime">Start Time:</label>
+    <input type="text" id="startTime" placeholder="MM:SS">
+    <br>
+    <br>
+    <label for="endTime">End Time:</label>
+    <input type="text" id="endTime" placeholder="MM:SS">
+    <br>
+    <br>
+    <button onclick="processAudio()">Process Audio</button>
+
+    <h2>Original Audio</h2>
+    <audio id="originalAudio" controls></audio>
+
+    <h2>Processed Audio</h2>
+    <audio id="processedAudio" controls></audio>
+
+    <div class="image-processing-btn">
+      <a href="image.html"><button>Image Processing</button></a>
+    </div>
+    
+    <div class="home-btn">
+      <a href="index.html"><button>Home</button></a>
+    </div>
+    
+  </div>
+
+  <script>
+    function processAudio() {
+      const audioInput = document.getElementById('audioInput');
+      const startTimeInput = document.getElementById('startTime');
+      const endTimeInput = document.getElementById('endTime');
+      const originalAudioElement = document.getElementById('originalAudio');
+      const processedAudioElement = document.getElementById('processedAudio');
+
+      const file = audioInput.files[0];
+      if (!file) {
+        console.error('No audio file selected');
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = function(event) {
+        const arrayBuffer = event.target.result;
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        audioContext.decodeAudioData(arrayBuffer, function(buffer) {
+          console.log('Audio file decoded');
+          const startTime = parseTime(startTimeInput.value);
+          const endTime = parseTime(endTimeInput.value);
+          if (!startTime || !endTime || startTime >= endTime) {
+            console.error('Invalid start time or end time');
+            return;
+          }
+
+          const sampleRate = buffer.sampleRate;
+          const numChannels = buffer.numberOfChannels;
+          const startSample = Math.floor(startTime * sampleRate);
+          const endSample = Math.floor(endTime * sampleRate);
+          const newBuffer = audioContext.createBuffer(numChannels, endSample - startSample, sampleRate);
+
+          for (let channel = 0; channel < numChannels; channel++) {
+            const channelData = buffer.getChannelData(channel);
+            const newChannelData = newBuffer.getChannelData(channel);
+
+            for (let i = startSample, j = 0; i < endSample; i++, j++) {
+              newChannelData[j] = channelData[i];
+            }
+          }
+
+          console.log('Audio processed:', newBuffer);
+          const newBufferArrayBuffer = bufferToWave(newBuffer);
+          processedAudioElement.src = URL.createObjectURL(new Blob([newBufferArrayBuffer]));
+        }, function(error) {
+          console.error('Error decoding audio file:', error);
+        });
+
+        // Setelah dekode audio selesai, muat audio ke elemen originalAudio
+        originalAudioElement.src = URL.createObjectURL(file);
+      };
+
+      reader.readAsArrayBuffer(file);
+    }
+
+    function parseTime(timeString) {
+      const parts = timeString.split(':');
+      if (parts.length !== 2) {
+        return null;
+      }
+      const minutes = parseInt(parts[0]);
+      const seconds = parseInt(parts[1]);
+      if (isNaN(minutes) || isNaN(seconds) || seconds < 0 || seconds >= 60) {
+        return null;
+      }
+      return minutes * 60 + seconds;
+    }
+
+    function bufferToWave(buffer) {
+      const interleaved = interleave(buffer);
+      const dataLength = interleaved.length * 2;
+      const bufferLength = dataLength + 44;
+      const arrayBuffer = new ArrayBuffer(bufferLength);
+      const view = new DataView(arrayBuffer);
+      const channels = buffer.numberOfChannels;
+      const sampleRate = buffer.sampleRate;
+      const bitsPerSample = 16;
+
+      // Menulis header file wave
+      writeString(view, 0, 'RIFF');
+      view.setUint32(4, bufferLength - 8, true);
+      writeString(view, 8, 'WAVE');
+      writeString(view, 12, 'fmt ');
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);
+      view.setUint16(22, channels, true);
+      view.setUint32(24, sampleRate, true);
+      view.setUint32(28, sampleRate * channels * bitsPerSample / 8, true);
+      view.setUint16(32, channels * bitsPerSample / 8, true);
+      view.setUint16(34, bitsPerSample, true);
+      writeString(view, 36, 'data');
+      view.setUint32(40, dataLength, true);
+
+      // Menulis data audio
+      floatTo16BitPCM(view, 44, interleaved);
+
+      return arrayBuffer;
+    }
+
+    function interleave(buffer) {
+      const numberOfChannels = buffer.numberOfChannels;
+      const length = buffer.length * numberOfChannels;
+      const result = new Float32Array(length);
+      const input = [];
+
+      for (let channel = 0; channel < numberOfChannels; channel++) {
+        input.push(buffer.getChannelData(channel));
+      }
+
+      let offset = 0;
+
+      for (let i = 0; i < buffer.length; i++) {
+        for (let channel = 0; channel < numberOfChannels; channel++) {
+          result[offset] = input[channel][i];
+          offset++;
+        }
+      }
+
+      return result;
+    }
+
+    function writeString(view, offset, string) {
+      for (let i = 0; i < string.length;  i++) {
+        view.setUint8(offset + i, string.charCodeAt(i));
+      }
+    }
+
+    function floatTo16BitPCM(output, offset, input) {
+      for (let i = 0; i < input.length; i++, offset += 2) {
+        const sample = Math.max(-1, Math.min(1, input[i]));
+        output.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+      }
+    }
+  </script>
+</body>
+</html>
